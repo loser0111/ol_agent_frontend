@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { ToolCallInfo, ToolResponseInfo } from '@/stores/chat'
+import { MAX_PERSISTED_TOOL_TEXT } from '@/stores/chatStorage'
 
 const props = defineProps<{
   toolCalls: ToolCallInfo[]
@@ -39,7 +40,11 @@ const steps = computed<ToolStep[]>(() => {
   return out
 })
 
-function truncate(text: string, max = 600): string {
+/** 返回内容展示上限；参数用落盘上限，保证刷新前后看到的内容一致 */
+const RESPONSE_DISPLAY_MAX = 600
+const ARGUMENT_DISPLAY_MAX = MAX_PERSISTED_TOOL_TEXT
+
+function truncate(text: string, max = RESPONSE_DISPLAY_MAX): string {
   return text.length > max ? `${text.slice(0, max)}…（内容过长已截断）` : text
 }
 </script>
@@ -56,7 +61,7 @@ function truncate(text: string, max = 600): string {
         <div class="tool-step">
           <div v-if="step.arguments" class="tool-block">
             <div class="tool-label">参数</div>
-            <pre class="tool-pre">{{ step.arguments }}</pre>
+            <pre class="tool-pre">{{ truncate(step.arguments, ARGUMENT_DISPLAY_MAX) }}</pre>
           </div>
           <div v-if="step.response" class="tool-block">
             <div class="tool-label">返回</div>

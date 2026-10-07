@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import { createSession as apiCreateSession, deleteSession as apiDeleteSession } from '@/api/session'
+import { clearMessages as clearStoredMessages } from './chatStorage'
 import type { SessionAccessControl, SessionMeta } from '@/types'
 
 const STORAGE_KEY = 'ol-agent:sessions'
@@ -32,7 +33,12 @@ export const useSessionStore = defineStore('session', () => {
   )
 
   function persist() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions.value))
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions.value))
+    } catch (err) {
+      // 配额被会话消息占满时不能连会话列表一起写失败（否则新建的会话刷新后消失）
+      console.warn('[session] 会话列表写入本地存储失败：', err)
+    }
   }
 
   async function newSession(sessionName?: string): Promise<SessionMeta> {
@@ -52,6 +58,8 @@ export const useSessionStore = defineStore('session', () => {
     await apiDeleteSession({ uId: uId.value, sessionId })
     sessions.value = sessions.value.filter((s) => s.sessionId !== sessionId)
     persist()
+    // ★ 同时删掉该会话的消息键：否则删掉的会话会在 localStorage 里长期残留
+    clearStoredMessages(sessionId)
     if (activeSessionId.value === sessionId) {
       activeSessionId.value = sessions.value[0]?.sessionId ?? ''
     }
@@ -63,7 +71,11 @@ export const useSessionStore = defineStore('session', () => {
 
   function setUId(value: string) {
     uId.value = value
-    localStorage.setItem(UID_KEY, value)
+    try {
+      localStorage.setItem(UID_KEY, value)
+    } catch (err) {
+      console.warn('[session] uId 写入本地存储失败：', err)
+    }
   }
 
   function setModelName(value: string) {

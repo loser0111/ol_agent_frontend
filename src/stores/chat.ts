@@ -1,24 +1,16 @@
 import { computed, reactive, ref } from 'vue'
 import { defineStore } from 'pinia'
+import { ElMessage } from 'element-plus'
 import { chatStream } from '@/api/chat'
 import { useSessionStore } from './session'
 import { applyChatEvent } from './chatEvent'
 import type { ChatMessage } from './chatEvent'
+import { clearMessages as clearStored, loadMessages, saveMessages } from './chatStorage'
 
 export type { ChatMessage, ToolCallInfo, ToolResponseInfo, MessageRole } from './chatEvent'
 
-function loadMessages(sessionId: string): ChatMessage[] {
-  try {
-    const raw = localStorage.getItem(chatKey(sessionId))
-    return raw ? (JSON.parse(raw) as ChatMessage[]) : []
-  } catch {
-    return []
-  }
-}
-
-function chatKey(sessionId: string): string {
-  return `ol-agent:chat:${sessionId}`
-}
+/** 流式过程中的落盘去抖间隔：避免每个 TOKEN 事件都做一次全量 JSON.stringify */
+const PERSIST_DEBOUNCE_MS = 300
 
 function uid(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
@@ -29,6 +21,7 @@ function uid(): string {
  *  - 消息按 sessionId 分组，本地持久化（后端暂无按会话查消息的接口）
  *  - sendMessage 走 chatStream，事件经 applyChatEvent 增量写入最后一条 assistant 消息
  *  - stop 通过 AbortController 中断生成
+ *  - 落盘统一走 chatStorage：带裁剪与配额兜底，写入失败不会打断流式对话
  */
 export const useChatStore = defineStore('chat', () => {
   const sessionStore = useSessionStore()
@@ -37,6 +30,11 @@ export const useChatStore = defineStore('chat', () => {
 
   let abortController: AbortController | null = null
   let streamingSessionId = ''
+
+  let persistTimer: number | null = null
+  let pendingSessionId = ''
+  /** 本地存储降级提示只弹一次，避免刷屏 */
+  let quotaWarned = false
 
   const messages = computed<ChatMessage[]>(() => {
     const id = sessionStore.activeSessionId
@@ -47,11 +45,36 @@ export const useChatStore = defineStore('chat', () => {
     return messagesBySession.value[id]
   })
 
-  function persist(sessionId: string) {
+  /** 立即落盘（关键节点用：发送、结束、出错、清空） */
+  function persistNow(sessionId: string) {
     const list = messagesBySession.value[sessionId]
-    if (list) {
-      localStorage.setItem(chatKey(sessionId), JSON.stringify(list))
+    if (!list) return
+    const result = saveMessages(sessionId, list)
+    if (result.reason === 'quota' && !quotaWarned) {
+      quotaWarned = true
+      ElMessage.warning('浏览器本地存储空间不足，历史记录已自动精简（当前页面显示不受影响）')
     }
+  }
+
+  /** 流式过程中的落盘（去抖）：合并高频事件，减少序列化开销 */
+  function schedulePersist(sessionId: string) {
+    pendingSessionId = sessionId
+    if (persistTimer != null) return
+    persistTimer = window.setTimeout(() => {
+      persistTimer = null
+      flushPersist()
+    }, PERSIST_DEBOUNCE_MS)
+  }
+
+  /** 把挂起的落盘立刻写掉（流结束时必须调用，避免最后一段事件丢失） */
+  function flushPersist() {
+    if (persistTimer != null) {
+      clearTimeout(persistTimer)
+      persistTimer = null
+    }
+    const id = pendingSessionId
+    pendingSessionId = ''
+    if (id) persistNow(id)
   }
 
   function getOrInit(sessionId: string): ChatMessage[] {
@@ -92,7 +115,7 @@ export const useChatStore = defineStore('chat', () => {
       createdAt: Date.now()
     })
     list.push(userMsg, assistantMsg)
-    persist(sessionId)
+    persistNow(sessionId)
 
     isStreaming.value = true
     streamingSessionId = sessionId
@@ -111,7 +134,7 @@ export const useChatStore = defineStore('chat', () => {
         {
           onEvent: (evt) => {
             applyChatEvent(assistantMsg, evt)
-            persist(sessionId)
+            schedulePersist(sessionId)
           },
           onDone: () => finish(sessionId, assistantMsg)
         },
@@ -122,9 +145,11 @@ export const useChatStore = defineStore('chat', () => {
       if (!(err instanceof DOMException && err.name === 'AbortError')) {
         assistantMsg.status = 'error'
         assistantMsg.error = err instanceof Error ? err.message : String(err)
-        persist(sessionId)
+        persistNow(sessionId)
       }
     } finally {
+      // 无论正常结束 / 出错 / 中断，都把挂起的落盘写掉
+      flushPersist()
       if (streamingSessionId === sessionId) {
         isStreaming.value = false
         streamingSessionId = ''
@@ -137,7 +162,7 @@ export const useChatStore = defineStore('chat', () => {
     if (msg.status !== 'error') {
       msg.status = 'done'
     }
-    persist(sessionId)
+    persistNow(sessionId)
   }
 
   /** 中断当前生成（AbortController） */
@@ -150,7 +175,7 @@ export const useChatStore = defineStore('chat', () => {
     const target = sessionId ?? sessionStore.activeSessionId
     if (!target) return
     messagesBySession.value[target] = []
-    persist(target)
+    clearStored(target)
   }
 
   return {
