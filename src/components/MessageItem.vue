@@ -1,69 +1,61 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { ChatMessage } from '@/stores/chat'
+import MarkdownBody from './MarkdownBody.vue'
 import ToolCallPanel from './ToolCallPanel.vue'
 
 const props = defineProps<{ message: ChatMessage }>()
 
 const isUser = computed(() => props.message.role === 'user')
+const isTool = computed(() => props.message.role === 'tool')
+const isSystem = computed(() => props.message.role === 'system')
+/** 非用户消息的左侧头像文案：工具消息用「工具」区分 */
+const leftAvatar = computed(() => (isTool.value ? '工具' : 'AI'))
 
-/**
- * 轻量渲染：把 ``` 围栏代码块抽出来，其余内容按纯文本（pre-wrap）展示。
- * 不引入 markdown 依赖，避免 XSS 风险。
- */
-interface Segment {
-  type: 'code' | 'text'
-  content: string
-}
+/** 系统提示词默认折叠（内容可能很长，避免每次进入会话都刷屏） */
+const systemExpanded = ref(false)
 
-const segments = computed<Segment[]>(() => {
-  const raw = props.message.content ?? ''
-  const out: Segment[] = []
-  let text = ''
-  let i = 0
-  while (i < raw.length) {
-    const start = raw.indexOf('```', i)
-    if (start === -1) {
-      text += raw.slice(i)
-      break
-    }
-    text += raw.slice(i, start)
-    const end = raw.indexOf('```', start + 3)
-    if (end === -1) {
-      text += raw.slice(start)
-      break
-    }
-    if (text) {
-      out.push({ type: 'text', content: text })
-      text = ''
-    }
-    out.push({ type: 'code', content: raw.slice(start + 3, end) })
-    i = end + 3
-  }
-  if (text) out.push({ type: 'text', content: text })
-  return out
-})
+/** 是否处于流式输出中：交给 MarkdownBody 做样式微调 */
+const isStreaming = computed(() => props.message.status === 'streaming')
 </script>
 
 <template>
-  <div class="message-row" :class="isUser ? 'user' : 'assistant'">
-    <div v-if="!isUser" class="avatar assistant-avatar">AI</div>
-    <div class="bubble" :class="isUser ? 'bubble-user' : 'bubble-assistant'">
+  <!-- 系统消息：折叠条，保持与后端消息顺序一致但不干扰阅读 -->
+  <div v-if="isSystem" class="system-row">
+    <div class="system-head" @click="systemExpanded = !systemExpanded">
+      <el-icon><InfoFilled /></el-icon>
+      <span class="system-title">系统提示词</span>
+      <span class="system-meta">{{ message.content.length }} 字</span>
+      <el-button link type="primary" size="small">
+        {{ systemExpanded ? '收起' : '展开' }}
+      </el-button>
+    </div>
+    <pre v-show="systemExpanded" class="system-body">{{ message.content }}</pre>
+  </div>
+
+  <div v-else class="message-row" :class="isUser ? 'user' : 'assistant'">
+    <div v-if="!isUser" class="avatar" :class="isTool ? 'tool-avatar' : 'assistant-avatar'">
+      {{ leftAvatar }}
+    </div>
+    <div
+      class="bubble"
+      :class="isUser ? 'bubble-user' : isTool ? 'bubble-tool' : 'bubble-assistant'"
+    >
       <template v-if="message.status === 'streaming' && !message.content && message.toolCalls.length === 0">
         <span class="typing">▍</span>
       </template>
 
-      <div v-for="(seg, idx) in segments" :key="idx" class="message-content">
-        <pre v-if="seg.type === 'code'">{{ seg.content }}</pre>
-        <div v-else class="plain-text">{{ seg.content }}</div>
-      </div>
-
-      <!-- 工具调用折叠面板 -->
+      <!-- 工具调用 / 工具返回：折叠成一行汇总（默认收起），放在正文之前，形成「过程 → 结论」 -->
       <ToolCallPanel
         v-if="message.toolCalls.length > 0 || message.toolResponses.length > 0"
         :tool-calls="message.toolCalls"
         :tool-responses="message.toolResponses"
       />
+
+      <!-- Markdown 渲染（内容在 renderMarkdown 中整体转义，可安全 v-html） -->
+      <div v-if="message.content" class="message-content">
+        <MarkdownBody :content="message.content" :streaming="isStreaming" />
+      </div>
 
       <!-- 错误提示 -->
       <div v-if="message.status === 'error'" class="error-box">
@@ -111,6 +103,62 @@ const segments = computed<Segment[]>(() => {
   border: 1px solid #e5e7eb;
 }
 
+.tool-avatar {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+  font-size: 11px;
+}
+
+.bubble-tool {
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-top-left-radius: 4px;
+  color: var(--color-text);
+}
+
+/* 系统提示词折叠条 */
+.system-row {
+  margin: 4px 0 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: #fafafa;
+  overflow: hidden;
+}
+
+.system-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  user-select: none;
+}
+
+.system-title {
+  font-weight: 500;
+}
+
+.system-meta {
+  flex: 1;
+}
+
+.system-body {
+  margin: 0;
+  padding: 10px 12px;
+  border-top: 1px solid var(--color-border);
+  background: #ffffff;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
 .bubble {
   max-width: min(760px, 82%);
   border-radius: 12px;
@@ -130,10 +178,6 @@ const segments = computed<Segment[]>(() => {
   border: 1px solid var(--color-border);
   border-top-left-radius: 4px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-}
-
-.plain-text {
-  white-space: pre-wrap;
 }
 
 .typing {

@@ -101,10 +101,20 @@ export interface ErrorData {
   message?: string
 }
 
+/** 会话状态（后端 SessionStatus） */
+export type SessionStatus = 'READY_TO_TALK' | 'CHATTING' | 'FINISHED'
+
+/** 会话类型（后端 SessionType） */
+export type SessionType = 'COORDINATOR' | 'WORKER'
+
+/** 消息角色：后端 MessageType 归一为小写（注意比前端 ChatMessage.role 多了 tool/system） */
+export type BackendMessageRole = 'user' | 'assistant' | 'tool' | 'system'
+
 /**
  * 前端本地会话记录。
- * 后端目前只提供 create/delete 接口（无 list），会话列表由前端本地维护，
- * 后端补 list 接口后可在 session store 中接入 fetchSessions。
+ * 后端已提供 GET /agent/session/list（见 api/session.ts 的 getSessionList），
+ * 会话列表由本地持久化 + 服务端列表合并而成；
+ * sessionStatus / sessionType / updatedAt 为服务端返回的补充字段（可选，旧数据没有）。
  */
 export interface SessionMeta {
   sessionId: string
@@ -112,4 +122,63 @@ export interface SessionMeta {
   modelName: string
   accessControl: SessionAccessControl
   createdAt: number
+  sessionStatus?: SessionStatus | null
+  sessionType?: SessionType | null
+  updatedAt?: number | null
 }
+
+/** GET /agent/session/list 的会话项 */
+export interface SessionListItem {
+  sessionId: string
+  sessionName?: string | null
+  modelName?: string | null
+  accessControl?: SessionAccessControl | null
+  sessionStatus?: SessionStatus | null
+  sessionType?: SessionType | null
+  createdAt?: number | null
+  updatedAt?: number | null
+}
+
+/** GET /agent/session/list 的响应体 */
+export interface SessionListResp {
+  sessions?: SessionListItem[] | null
+  total?: number | null
+  page?: number | null
+  pageSize?: number | null
+  baseResp?: BaseResp
+}
+
+/** 工具调用项（assistant 消息） */
+export interface ToolCallItem {
+  id?: string | null
+  type?: string | null
+  name?: string | null
+  arguments?: string | null
+}
+
+/** 工具返回项（tool 消息 / assistant 消息上的结果） */
+export interface ToolResponseItem {
+  id?: string | null
+  name?: string | null
+  response?: string | null
+}
+
+/** GET /agent/session/{sessionId}/messages 的消息项 */
+export interface MessageListItem {
+  id: string
+  role: BackendMessageRole
+  content: string
+  createdAt?: number | null
+  toolCalls: ToolCallItem[]
+  toolResponses: ToolResponseItem[]
+}
+
+/** GET /agent/session/{sessionId}/messages 的响应体 */
+export interface MessageListResp {
+  messages?: MessageListItem[] | null
+  total?: number | null
+  page?: number | null
+  pageSize?: number | null
+  baseResp?: BaseResp
+}
+

@@ -52,7 +52,13 @@ function handleKeydown(e: KeyboardEvent) {
     />
     <div class="input-actions">
       <span class="hint">
-        {{ chatStore.isStreaming ? '生成中，可随时停止' : '模型：' + sessionStore.modelName }}
+        {{
+          chatStore.isStreaming
+            ? '生成中，可随时停止'
+            : chatStore.historyLoading
+              ? '正在加载历史消息…'
+              : '模型：' + sessionStore.modelName
+        }}
       </span>
       <el-button
         v-if="chatStore.isStreaming"
@@ -66,7 +72,7 @@ function handleKeydown(e: KeyboardEvent) {
         v-else
         type="primary"
         :icon="Promotion"
-        :disabled="!inputRef.trim() || !sessionStore.activeSessionId"
+        :disabled="!inputRef.trim() || !sessionStore.activeSessionId || chatStore.historyLoading"
         @click="handleSend"
       >
         发送

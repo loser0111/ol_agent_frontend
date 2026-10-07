@@ -29,10 +29,15 @@ function handleSave() {
     ElMessage.warning('uId 不能为空')
     return
   }
+  const uidChanged = form.uId.trim() !== sessionStore.uId
   sessionStore.setUId(form.uId.trim())
   sessionStore.setModelName(form.modelName.trim() || 'deepseek-flash')
   sessionStore.setAccessControl(form.accessControl)
   ElMessage.success('设置已保存，后续对话将使用新配置')
+  if (uidChanged) {
+    // 换了用户：重新拉取该 uId 的会话列表
+    void sessionStore.fetchSessions()
+  }
 }
 
 async function handleClearMessages() {
@@ -104,7 +109,8 @@ async function handleClearMessages() {
         <span class="card-title">本地数据</span>
       </template>
       <p class="danger-tip">
-        会话与消息记录默认保存在浏览器 localStorage（后端暂无会话/消息查询接口）。
+        会话列表已接入后端接口（GET /agent/session/list），仅"会话显示名"会缓存在浏览器
+        localStorage 作为兜底；会话消息仍保存在本地（后端已有查询接口，展示接入进行中）。
         删除会话会调用后端软删接口，本地记录随之移除。
       </p>
       <el-button type="danger" plain @click="handleClearMessages">清空当前会话消息</el-button>
