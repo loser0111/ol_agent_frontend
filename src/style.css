@@ -1,0 +1,70 @@
+:root {
+  --app-header-height: 52px;
+  --app-sidebar-width: 280px;
+  --color-border: #e5e7eb;
+  --color-text: #1f2937;
+  --color-text-secondary: #6b7280;
+  --color-bg: #f8fafc;
+  --color-bubble-user: #2563eb;
+  --color-bubble-user-text: #ffffff;
+  --color-bubble-assistant: #ffffff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family:
+    'Inter',
+    'PingFang SC',
+    'Microsoft YaHei',
+    'Helvetica Neue',
+    Arial,
+    sans-serif;
+  color: var(--color-text);
+  background: var(--color-bg);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 聊天区滚动条 */
+.chat-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.chat-scroll::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+.chat-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 消息内容里的代码块 */
+.message-content pre {
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.message-content code {
+  font-family: 'JetBrains Mono', Consolas, 'Courier New', monospace;
+}
+.message-content :not(pre) > code {
+  background: #f1f5f9;
+  color: #be185d;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 12.5px;
+}
