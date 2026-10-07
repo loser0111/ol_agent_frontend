@@ -1,9 +1,14 @@
 /**
  * SSE 事件 → 前端消息对象的纯更新逻辑（可单测，不依赖 pinia/vue）。
  */
-import type { ChatResp, ToolCallData, ToolResponseData } from '@/types'
+import type { ChatResp, MessageListItem, ToolCallData, ToolResponseData } from '@/types'
 
-export type MessageRole = 'user' | 'assistant'
+/**
+ * 消息角色。
+ * user / assistant 来自前端流式对话；tool / system 只会由后端历史（t_message.type）带出来，
+ * 保持与后端一致，便于按服务端顺序还原整段对话。
+ */
+export type MessageRole = 'user' | 'assistant' | 'tool' | 'system'
 
 export interface ToolCallInfo {
   id: string
@@ -26,6 +31,41 @@ export interface ChatMessage {
   status: 'streaming' | 'done' | 'error'
   error?: string
   createdAt: number
+}
+
+const KNOWN_ROLES: MessageRole[] = ['user', 'assistant', 'tool', 'system']
+
+/** 后端 role 归一（脏数据兜底为 assistant，保证 UI 一定能渲染） */
+export function normalizeRole(role: unknown): MessageRole {
+  const value = String(role ?? '').toLowerCase() as MessageRole
+  return KNOWN_ROLES.includes(value) ? value : 'assistant'
+}
+
+/**
+ * 后端消息（GET /agent/session/{id}/messages 的一项）→ 前端 ChatMessage。
+ *
+ * 后端按时间正序返回，这里**不重排、不合并**，逐条一一对应，
+ * 以便「消息内容/顺序/角色」与服务端完全一致（含 tool / system 行）。
+ */
+export function toChatMessage(item: MessageListItem): ChatMessage {
+  return {
+    id: item.id || `srv-${item.createdAt ?? Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    role: normalizeRole(item.role),
+    content: item.content ?? '',
+    toolCalls: (item.toolCalls ?? []).map((call) => ({
+      id: call.id ?? '',
+      name: call.name ?? 'unknown',
+      arguments: call.arguments ?? ''
+    })),
+    toolResponses: (item.toolResponses ?? []).map((resp) => ({
+      id: resp.id ?? '',
+      name: resp.name ?? 'unknown',
+      response: resp.response ?? ''
+    })),
+    // 服务端历史都是已完成的消息
+    status: 'done',
+    createdAt: Number(item.createdAt ?? Date.now())
+  }
 }
 
 export function asText(data: unknown): string {
